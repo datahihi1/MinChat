@@ -1,0 +1,73 @@
+<?php
+// Lấy tham số từ CLI
+$args = $argv;
+array_shift($args); // bỏ file name (run_server.php)
+
+$thisfile = basename(__FILE__);
+
+$option  = $args[0] ?? null;
+
+// Bắt đầu đo thời gian và bộ nhớ
+$startTime = microtime(true);
+$startMemory = memory_get_usage();
+$os = PHP_OS;
+
+$isWindows = stripos(PHP_OS, 'WIN') === 0;
+
+if ($isWindows) {
+    $phpCmd = "php"; // Windows thường không cần đường dẫn tuyệt đối
+} else {
+    $phpCmd = "/usr/bin/php"; // Đường dẫn PHP trên Unix-based OS
+}
+
+if ($option === "--local") {
+    $cmd = "$phpCmd -S localhost:8080";
+    echo "Starting PHP server on http://localhost:8080 (Local only) ...\n";
+} elseif ($option === "--public") {
+    $cmd = "$phpCmd -S 0.0.0.0:8080";
+    echo "Starting PHP server on http://0.0.0.0:8080 (LAN accessible) ...\n";
+} else {
+    echo "Usage: php $thisfile [--local|--public]\n";
+    exit(1);
+}
+
+// Chạy server bằng proc_open
+$descriptorspec = [
+    0 => ["pipe", "r"],  // stdin
+    1 => ["pipe", "w"],  // stdout
+    2 => ["pipe", "w"]   // stderr
+];
+
+$process = proc_open($cmd, $descriptorspec, $pipes);
+
+if (is_resource($process)) {
+    stream_set_blocking($pipes[1], false);
+    stream_set_blocking($pipes[2], false);
+
+    // Vòng lặp chính: đọc log server + in thông tin runtime
+    while (true) {
+        $serverOut = stream_get_contents($pipes[1]);
+        $serverErr = stream_get_contents($pipes[2]);
+
+        if ($serverOut) echo $serverOut;
+        if ($serverErr) echo $serverErr;
+
+        // In thống kê runtime mỗi 5 giây
+        static $lastStat = 0;
+        if (time() - $lastStat >= 5) {
+            $elapsed = round(microtime(true) - $startTime, 2);
+            $memoryUsed = round((memory_get_usage() - $startMemory) / 1024 / 1024, 2);
+            echo "[INFO] Uptime: {$elapsed}s | Memory: {$memoryUsed}MB | OS: {$os}\n";
+            $lastStat = time();
+        }
+
+        // Hiển thị thời gian real-time
+        $currentTime = date('Y-m-d H:i:s');
+        echo "[REAL-TIME] Current Time: {$currentTime}\n";
+        usleep(1000000); // nghỉ 1 giây để cập nhật thời gian
+    }
+} else {
+    echo "Available commands:\n";
+    echo "  php $thisfile --local   Run local server (localhost only)\n";
+    echo "  php $thisfile --public  Run public server (LAN accessible)\n";
+}
